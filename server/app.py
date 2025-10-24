@@ -3,6 +3,10 @@
 
 import asyncio
 from websockets import serve
+import http
+import os
+import signal
+
 
 # track connected clients
 CONNECTED = set()
@@ -31,6 +35,12 @@ async def handler(websocket):
         CONNECTED.discard(websocket)
         print(f"Client disconnected: {addr}")
 
+
+def health_check(connection, request):
+    if request.path == "/healthz":
+        return connection.respond(http.HTTPStatus.OK, "OK\n")
+    
+    
 # --- added plain TCP bridge handler ---
 async def handle_plain_tcp(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     peer = writer.get_extra_info('peername')
@@ -58,8 +68,15 @@ async def handle_plain_tcp(reader: asyncio.StreamReader, writer: asyncio.StreamW
 
 async def main():
     # start websocket server on 2028
-    ws_server = await serve(handler, "0.0.0.0", 2028)
-    print("WebSocket server listening on ws://0.0.0.0:2028")
+    port = int(os.environ.get("PORT", "2028"))
+    async with serve(handler, "", port, process_request=health_check) as server:
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGTERM, server.close)
+        await server.wait_closed() 
+    
+    
+    ws_server = await serve(handler, "", 2028)
+    print("WebSocket server listening on ws://localhost:2028")
 
     # start plain TCP server on 2029 (change STM32 DEST_PORT to 2029)
     tcp_server = await asyncio.start_server(handle_plain_tcp, "0.0.0.0", 2029)
